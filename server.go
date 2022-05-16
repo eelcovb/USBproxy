@@ -21,10 +21,17 @@ const (
 	NoReadDelay    = 0
 	ShortReadDelay = 100
 	LongReadDelay  = 200
+	SServerTimeout = 100  // ms
+	pWait, pResume = 8, 9 // communication flags for the ProxyLock Channel
 )
 
 // ServerError types
 type ServerError int
+
+// The ProxyLock channel keeps track on side channel communications
+// The secondaryServer will set pWait when it's using the USB channel
+// and pResume when things are allowed to be resumed
+var ProxyLock = make(chan int, 1)
 
 // Error types
 const (
@@ -37,6 +44,22 @@ const (
 	connectionRetryDelay  = time.Second * 30
 	buffSize              = 1024
 )
+
+// SBuffer
+// Sized buffer, keeps track on the intended  size of what's in the buffer
+type SBuffer struct {
+	Buffer []byte
+	Len    int
+}
+
+func NewBuffer(size int) *SBuffer {
+	buf := make([]byte, size)
+	buffer := &SBuffer{
+		Buffer: buf,
+		Len:    0, // it's empty because it's new
+	}
+	return buffer
+}
 
 func getInOutEndpoints(intf *gousb.Interface) (in, out int) {
 
@@ -69,9 +92,9 @@ func flush(buf *[]byte) {
 // It monitors the data in, and sends the data out using the given out function
 // The connError channel will be set when there's an error in either stream
 // The descIn and descOut are used for logging information
-// If debug is set, all datapackages are shown
-// The delay on read specifies the number of milliseconds to delay the readloop
-// This is useful voor noisy equipment hogging the CPU
+// If debug is set, all data packages are shown
+// The delay on read specifies the number of milliseconds to delay the read loop
+// This is useful for noisy equipment hogging the CPU
 func ProxyIO(in, out func([]byte) (int, error),
 	descIn, descOut string,
 	debug bool,
@@ -87,11 +110,31 @@ func ProxyIO(in, out func([]byte) (int, error),
 		descIn, descOut, connError, delayOnRead)
 
 	for err == nil {
+		if descIn == "usb" {
+			// traffic on secondary channel, hold
+			lockStatus := <-ProxyLock
+			if lockStatus == pWait {
+				log.Printf("ProxyIO() secondaryServer initiated pWait for USB-in\n")
+				// wait until we get the next signal
+				lockStatus = <-ProxyLock
+				log.Printf("ProxyIO() pWait lock released\n")
+			}
+		}
 		bytesRead, err = in(buf[:])
 		if err != nil {
 			continue
 		}
 		if bytesRead > 0 {
+			if descOut == "usb" {
+				// traffic on secondary channel, hold
+				lockStatus := <-ProxyLock
+				if lockStatus == pWait {
+					log.Printf("ProxyIO() secondaryServer initiated pWait for USB-out\n")
+					// wait until we get the next signal
+					lockStatus = <-ProxyLock
+					log.Printf("ProxyIO() pWait lock released\n")
+				}
+			}
 			bytesWrite, err = out(buf[:bytesRead])
 			if debug {
 				log.Printf("%s ---- (%d/%d) bytes ----> %s [%v]",
@@ -195,7 +238,7 @@ func RunProxyMode(proxySettings *string, zeroConfName string) {
 		buffSize,
 		errChannel)
 
-	// Block until the an error is set on the channel
+	// Block until  an error is set on the channel
 	connError := <-errChannel
 
 	log.Fatalf("Proxy finished due to a connection error:  %s", connError)
@@ -216,15 +259,83 @@ func ActivateBonjour(p *Printer) {
 
 	log.Printf("Printer %s (%s) is registered with zeroconf (port %d)\n", p.SerialNumber, p.Description, p.TCPPort)
 
-	// Block on signal until a false is received on the ZeroConf channel
+	// Block on signal until false is received on the ZeroConf channel
 	<-p.ZeroConf
 
 	log.Printf("Zeroconf service for %s (%s) received termination signal", p.SerialNumber, p.Description)
 }
 
+// SecondaryServer
+// Implements a secondary TCP server at given port
+// Will run a separate proxy for its communication
+func SecondaryServer(port int, usbIn, usbOut func([]byte) (int, error)) {
+
+	log.Printf("SecondaryServer: Opening secondary port %d\n", port)
+	sPortListener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		log.Printf("SecondaryServer: unable to open port %d: %s\n", port, err)
+		return
+	}
+	defer sPortListener.Close()
+
+	// Service incoming connections
+	for {
+
+		// Accept incoming connection
+		// This holds until something is going on
+		conn, err := sPortListener.Accept()
+		if err != nil {
+			log.Printf("SecondaryServer: failed to connect to incoming connection: %s", err)
+			return
+		}
+		log.Printf("SecondaryServer: Incoming connection from %s\n", conn.RemoteAddr())
+
+		buf := NewBuffer(1024)
+		// Read it out in one try
+		buf.Len, err = conn.Read(buf.Buffer)
+		log.Printf("SecondaryServer: received %d bytes from %s: [%s]\n",
+			buf.Len,
+			conn.RemoteAddr(),
+			buf.Buffer)
+
+		// Lock the proxies
+		ProxyLock <- pWait
+
+		// Send it to the USB port
+		_, err = usbOut(buf.Buffer)
+
+		if err == nil {
+
+			// Delay a little bit
+			time.Sleep(time.Millisecond * SServerTimeout)
+
+			// Readout the USB port
+			buf.Len, err = usbIn(buf.Buffer)
+
+			if err == nil {
+				// send back the response and close the channel
+				conn.Write(buf.Buffer)
+				fmt.Printf("SecondaryServer: sent %d bytes from USB feed to %s: [%s]\n",
+					buf.Len, conn.RemoteAddr(), buf.Buffer)
+			} else {
+				log.Printf("SecondaryServer: failed to receive data from USB endpoint: %s\n", err)
+			}
+		} else {
+			log.Printf("SecondaryServer: failed to send data to USB endpoint: %s\n", err)
+		}
+
+		// unlock the proxies
+		ProxyLock <- pResume
+
+		// Close the connection - this is intended behavior for POS printers
+		conn.Close()
+	}
+
+}
+
 // Server runs a tcp server
 // and sends back and forth the data from the USB bus using the ProxyIO() function
-// It uses a channel to report back when something happend
+// It uses a channel to report back when something happened
 func Server(chP chan *Printer) {
 
 	// Receive the printer to start a server for over the channel
@@ -361,6 +472,13 @@ func Server(chP chan *Printer) {
 	// Create a channel to be noticed of any communication errors
 	errChannel := make(chan error)
 
+	// Check if we need to set up a side channel
+	if sPort > 0 {
+		// create a channel to work in separate communications
+		// initiate the server
+		go SecondaryServer(sPort, epIn.Read, epOut.Write)
+	}
+
 	readDelay := ShortReadDelay
 	// Check if there is a star device connected
 	if p.Vendor == StarVendorID {
@@ -369,12 +487,12 @@ func Server(chP chan *Printer) {
 		log.Printf("Star device detected, setting read delay to %dms", readDelay)
 	}
 
-	// Setup a ProxyIO from USB to TCP
+	// Set up a ProxyIO from USB to TCP
 	// Specifically set a read delay for busy USB devices
 	go ProxyIO(epIn.Read, conn.Write, "USB", conn.RemoteAddr().String(),
 		debug, readDelay, maxUsbInBufferSize, errChannel)
 
-	// Setup a ProxyIO from TCP to USB
+	// Set up a ProxyIO from TCP to USB
 	go ProxyIO(conn.Read, epOut.Write, conn.RemoteAddr().String(), "USB",
 		debug, NoReadDelay, maxUsbInBufferSize, errChannel)
 

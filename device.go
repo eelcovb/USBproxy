@@ -67,7 +67,7 @@ type PrinterList struct {
 }
 
 // Cleanup removes a certain printer from the list
-// Cleanup waites for a printer to come out of the server process
+// Cleanup waits for a printer to come out of the server process
 // It then cleans it from the map
 func (pl *PrinterList) Cleanup(chP chan *Printer) {
 
@@ -110,7 +110,7 @@ func (pl *PrinterList) Save() error {
 			}
 		}
 	} else {
-		err = fmt.Errorf("Save(): StoragePath not set")
+		err = fmt.Errorf("Save(): storagePath not set")
 	}
 	return err
 }
@@ -127,7 +127,7 @@ func (pl *PrinterList) Load() error {
 		file.Close()
 		return err
 	}
-	return fmt.Errorf("Load(): StoragePath not set")
+	return fmt.Errorf("Load(): storagePath not set")
 }
 
 // USBKey generates an 'unique' USB key

@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	application          = "Spark"
+	application          = "USBproxy"
 	copyright            = "(c) 2022 Impero, LLC."
 	version              = "0.4"
-	storageFile          = "spark.dat"
+	storageFile          = "usbproxy.dat"
 	printerTypesListFile = "printerTypes.txt"
 	monitorMemory        = false
 	mainLoopDelayInMs    = 500
@@ -26,6 +26,9 @@ const (
 )
 
 var debug bool
+
+// Set to anything else than 0 when a secondary port needs to be active
+var sPort int
 
 // MemoryReporter Separate thread which reports on memory every
 // MemoryCheckInterval seconds
@@ -65,7 +68,8 @@ func main() {
 	log.Printf("*** %s %s %s\n", application, version, copyright)
 
 	proxyMode := flag.String("proxy", "", "Format <myport>:<targethost>:<targetport>, runs a proxy server")
-	debugMode := flag.Bool("debug", false, "Runs Spark in debug mode")
+	dualPort := flag.Int("dualPort", 0, "If set, this secondary port is opened and its data inserted to the USB stream")
+	debugMode := flag.Bool("debug", false, "Runs USBproxy in debug mode")
 	zeroConfName := flag.String("zeroconf", "Star TSP654", "Define a zeroconf (bonjour) name for when spark runs as proxy")
 	noStar := flag.Bool("nostar", false, "Do not detect star devices and set their USB-ID's if they don't have them set")
 	flag.Parse()
@@ -89,6 +93,8 @@ func main() {
 	} else {
 		log.Printf("Loaded %d printer type definitions: %v", len(pl.PrinterTypes), pl.PrinterTypes)
 	}
+
+	sPort = *dualPort
 
 	// Set the storagePath
 	pl.StoragePath = storageFile
