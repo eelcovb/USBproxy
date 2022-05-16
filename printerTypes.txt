@@ -1,0 +1,12 @@
+# All supported printers are defined here
+# To add a new printer (group):
+# <Brand>:<VendorID in hex, do not precede the vendorID with 0x
+# So for example, the vendor id for a Star Printer is 0x519
+# so use Star:0519 on a clear line.
+
+# Star Printers
+Star:0519
+
+# Epson Printers
+Epson:0e02
+Epson:04b8

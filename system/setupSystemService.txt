@@ -1,0 +1,5 @@
+Make sure the spark binary is installed in /home/ordermore/spark
+Move spark.system to /etc/systemd/system
+Enable it by systemctl enable spark.service
+Start it by running service spark start
+Verify it is running by service spark status

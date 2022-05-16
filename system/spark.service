@@ -1,0 +1,21 @@
+[Unit]
+Description=OrderMore Spark
+After=network.target
+
+[Service]
+Type=simple
+
+User=ordermore
+Group=ordermore
+
+WorkingDirectory=/home/ordermore/spark
+ExecStart=/bin/sh -c "/home/ordermore/spark/spark >> /home/ordermore/spark/spark.log 2>&1"
+ExecStop=/bin/kill -TERM $MAINPID
+SuccessExitStatus=2
+
+Restart=on-failure
+ProtectSystem=true
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
