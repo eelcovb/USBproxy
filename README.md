@@ -1,2 +1,2 @@
-# spark
-Star and Epson print print proxy
+# USBproxy
+TCP to USB proxy
