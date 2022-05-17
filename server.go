@@ -431,6 +431,13 @@ func Server(chP chan *Printer) {
 
 	p.USBConnected = true
 
+	// Check if we need to set up a side channel
+	if sPort > 0 {
+		// create a channel to work in separate communications
+		// initiate the server
+		go SecondaryServer(sPort, epIn.Read, epOut.Write)
+	}
+
 	// Determine buffer size
 	maxUsbInBufferSize := 10 * epIn.Desc.MaxPacketSize
 
@@ -471,13 +478,6 @@ func Server(chP chan *Printer) {
 
 	// Create a channel to be noticed of any communication errors
 	errChannel := make(chan error)
-
-	// Check if we need to set up a side channel
-	if sPort > 0 {
-		// create a channel to work in separate communications
-		// initiate the server
-		go SecondaryServer(sPort, epIn.Read, epOut.Write)
-	}
 
 	readDelay := ShortReadDelay
 	// Check if there is a star device connected
