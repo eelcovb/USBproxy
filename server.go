@@ -28,6 +28,7 @@ const (
 // ServerError types
 type ServerError int
 
+// FIXME: unsafe method - use a channel
 var SSup bool = false
 
 // The ProxyLock channel keeps track on side channel communications
