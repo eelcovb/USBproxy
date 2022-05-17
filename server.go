@@ -28,6 +28,8 @@ const (
 // ServerError types
 type ServerError int
 
+var SSup bool = false
+
 // The ProxyLock channel keeps track on side channel communications
 // The secondaryServer will set pWait when it's using the USB channel
 // and pResume when things are allowed to be resumed
@@ -278,8 +280,10 @@ func SecondaryServer(port int, usbIn, usbOut func([]byte) (int, error)) {
 	}
 	defer sPortListener.Close()
 
+	SSup = true
+
 	// Service incoming connections
-	for {
+	for SSup {
 
 		// Accept incoming connection
 		// This holds until something is going on
@@ -330,7 +334,8 @@ func SecondaryServer(port int, usbIn, usbOut func([]byte) (int, error)) {
 		// Close the connection - this is intended behavior for POS printers
 		conn.Close()
 	}
-
+	sPortListener.Close()
+	log.Printf("SeconddaryServer: Shutdown\n")
 }
 
 // Server runs a tcp server
@@ -431,11 +436,14 @@ func Server(chP chan *Printer) {
 
 	p.USBConnected = true
 
+	shutdownSS := func() { SSup = false }
+
 	// Check if we need to set up a side channel
 	if sPort > 0 {
 		// create a channel to work in separate communications
 		// initiate the server
 		go SecondaryServer(sPort, epIn.Read, epOut.Write)
+		defer shutdownSS()
 	}
 
 	// Determine buffer size
